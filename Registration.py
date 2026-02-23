@@ -14,20 +14,17 @@ from scipy import interpolate
 def find_match(img1, img2):
     # To do
     sift = cv2.SIFT_create()   
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
+    keypoints1, descriptors1 = sift.detectAndCompute(img1, None)
+    keypoints2, descriptors2 = sift.detectAndCompute(img2, None)
 
-    if des1 is None or des2 is None or len(des2) < 2:
-        return np.zeros((0, 2)), np.zeros((0, 2))
-
-    nbrs = NearestNeighbors(n_neighbors=2).fit(des2)
-    distances, indices = nbrs.kneighbors(des1)
+    neighbors = NearestNeighbors(n_neighbors=2).fit(descriptors2)
+    distances, indices = neighbors.kneighbors(descriptors1)
 
     x1, x2 = [], []
     for i in range(len(distances)):
         if distances[i][0] < 0.7 * distances[i][1]:
-            x1.append(kp1[i].pt)
-            x2.append(kp2[indices[i][0]].pt)
+            x1.append(keypoints1[i].pt)
+            x2.append(keypoints2[indices[i][0]].pt)
     return np.array(x1), np.array(x2)
 
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
