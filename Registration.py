@@ -8,10 +8,26 @@ from scipy import interpolate
 
 def find_match(img1, img2):
     # To do
-    return x1, x2
+    sift = cv2.SIFT_create()   
+    kp1, des1 = sift.detectAndCompute(img1, None)
+    kp2, des2 = sift.detectAndCompute(img2, None)
+
+    if des1 is None or des2 is None or len(des2) < 2:
+        return np.zeros((0, 2)), np.zeros((0, 2))
+
+    nbrs = NearestNeighbors(n_neighbors=2).fit(des2)
+    distances, indices = nbrs.kneighbors(des1)
+
+    x1, x2 = [], []
+    for i in range(len(distances)):
+        if distances[i][0] < 0.7 * distances[i][1]:
+            x1.append(kp1[i].pt)
+            x2.append(kp2[indices[i][0]].pt)
+    return np.array(x1), np.array(x2)
 
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     # To do
+    A = np.eye(3) # Placeholder
     return A
 
 def warp_image(img, A, output_size):
@@ -136,6 +152,8 @@ if __name__ == '__main__':
     x1, x2 = find_match(template, target_list[0])
     visualize_find_match(template, target_list[0], x1, x2)
 
+    ransac_thr = 5.0
+    ransac_iter = 1000
     A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
 
     img_warped = warp_image(target_list[0], A, template.shape)
@@ -148,5 +166,3 @@ if __name__ == '__main__':
 
     A_list = track_multi_frames(template, target_list)
     visualize_track_multi_frames(template, target_list, A_list)
-
-
