@@ -1,3 +1,8 @@
+# EE 5271 Robot Vision Homework 2
+# Erik Sarkinen
+# Student ID: 3854563
+# 2/23/26
+
 import cv2
 import numpy as np
 import scipy.io as sio
