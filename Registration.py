@@ -9,6 +9,7 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from scipy import interpolate
+from scipy.interpolate import interpn
 
 
 def find_match(img1, img2):
@@ -108,37 +109,46 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     print("Affine Transformation Matrix (M):\n", A)
     return A
 
-'''
-    # Create the A matrix for the linear system Ax = B
-    # Each point (x, y) adds two rows to A:
-    # [x, y, 1, 0, 0, 0] * [a, b, c, d, e, f]^T = x'
-    # [0, 0, 0, x, y, 1] * [a, b, c, d, e, f]^T = y'
-
-
-    A = np.zeros((6, 6), dtype=np.float32)
-    B = np.zeros((6, 1), dtype=np.float32)
-
-    for i in range(3):
-        x, y = x1[i]
-        xp, yp = x2[i]
-        
-        A[i*2] = [x, y, 1, 0, 0, 0]
-        B[i*2] = xp
-        
-        A[i*2 + 1] = [0, 0, 0, x, y, 1]
-        B[i*2 + 1] = yp
-
-
-        # Solve Ax = B for x
-        # Use np.linalg.solve for exactly 3 points
-       #x2 = np.linalg.solve(A, B)
-        #print("Affine Transformation Matrix (M):\n", A)
-        '''
 def warp_image(img, A, output_size):
     # To do
+ # Calculate the inverse of A
+    A_inv = np.linalg.inv(A)   
+    # Example: Create a sample original image (e.g., a gradient)
+    # In a real scenario, this would be your loaded image data (grayscale for simplicity)
+    # Shape of image: (rows, cols)
+    rows, cols = img.shape
+  #  original_image = np.indices((rows, cols), dtype=float)[0] + np.indices((rows, cols), dtype=float)[1]
+
+    # Define the points/coordinates of the original image grid
+    # interpn expects 1D arrays for each dimension's coordinates
+    points = (np.arange(rows), np.arange(cols))
+
+    # Assuming the warped image has the same dimensions as the original for simplicity
+    dest_rows, dest_cols = output_size
+    # Create a grid of destination coordinates
+    dest_coords_rows, dest_coords_cols = np.indices((dest_rows, dest_cols), dtype=float)
+    # Flatten destination coordinates and represent as homogeneous coordinates (x, y, 1)
+    dest_coords_flat = np.vstack((dest_coords_cols.flatten(), dest_coords_rows.flatten(), np.ones(dest_rows * dest_cols)))
+
+    # Apply inverse transformation
+    # The result will be source coordinates (x', y', w')
+    src_coords_flat_h = A_inv @ dest_coords_flat
+
+    # Convert back from homogeneous coordinates if necessary (divide x', y' by w')
+    src_coords_cols_flat = src_coords_flat_h[0] / src_coords_flat_h[2]
+    src_coords_rows_flat = src_coords_flat_h[1] / src_coords_flat_h[2]
+
+    # Combine source coordinates into the format interpn expects: (npoints, ndims)
+    xi = np.vstack((src_coords_rows_flat, src_coords_cols_flat)).T
+    # Interpolate values
+    warped_values_flat = interpn(points, img, xi, method='linear', bounds_error=False, fill_value=0) #
+
+    # Reshape the result back into the warped image's shape
+    img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
+
     return img_warped
 
-
+'''
 def align_image(template, target, A):
     # To do
     return A_refined
@@ -147,7 +157,7 @@ def align_image(template, target, A):
 def track_multi_frames(template, img_list):
     # To do
     return A_list
-
+'''
 
 def visualize_find_match(img1, img2, x1, x2, img_h=500):
     assert x1.shape == x2.shape, 'x1 and x2 should have same shape!'
