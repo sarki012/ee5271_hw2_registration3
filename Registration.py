@@ -13,7 +13,10 @@ from scipy import interpolate
 
 def find_match(img1, img2):
     # To do
+    # Create a SIFT (Scale-Invariant Feature Transform) object
     sift = cv2.SIFT_create()   
+    # The variables keypoints hold the x-and-y coordinates of key points
+    # Descriptors are 128-dimensional feature descriptor vectors
     keypoints1, descriptors1 = sift.detectAndCompute(img1, None)
     keypoints2, descriptors2 = sift.detectAndCompute(img2, None)
 
@@ -29,7 +32,69 @@ def find_match(img1, img2):
 
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     # To do
+    """
+    RANSAC algorithm for 2D line fitting.
+    
+    :param data: A numpy array of shape (N, 2) where N is the number of points.
+    :param min_samples: Minimum number of samples to draw to fit a model (e.g., 2 for a line).
+    :param threshold: Maximum distance for a point to be considered an inlier.
+    :param max_iterations: Maximum number of iterations to run RANSAC.
+    :return: The best model parameters (slope, intercept) and the set of inliers.
+    """
+    best_model = None
+    best_inliers = np.array([])
+    max_inlier_count = 0
+    N_samples = 3 
     A = np.eye(3) # Placeholder
+    for i in range(ransac_iter):
+        # Assume 'data' is a numpy array of your data points, e.g., shape (N_points, N_features)
+        # N_samples is the minimum number of points needed to fit your specific model (e.g., 2 for a line, 3 for a plane)
+        # Get the indices of the data points
+        sample_indices = np.random.choice(len(x1), N_samples, replace=False)
+        sample = x1[sample_indices]
+        # Get the actual data points corresponding to these indices
+        random_subset = x1[sample_indices]
+        # np.polyfit returns the slope and intercept of the line that best fits these points
+        try:
+            m, c = np.polyfit(random_subset[:, 0], random_subset[:, 1], deg=1)
+        except np.linalg.LinAlgError:
+            # Handle cases where sample points are e.g. vertical, causing fit errors
+            continue
+        # 3. Determine inliers based on the current model and threshold
+        # Calculate residuals (distances) for all points
+        y_predicted = m * x1[:, 0] + c
+        # Use absolute difference as a distance metric
+        distances = np.abs(x1[:, 1] - y_predicted)
+        
+        current_inliers_mask = distances < ransac_thr
+        current_inliers = x1[current_inliers_mask]
+        inlier_count = len(current_inliers)
+
+        # 4. Check if this model is better than the best so far
+        if inlier_count > max_inlier_count:
+            max_inlier_count = inlier_count
+            # Retrain model with all current inliers for a more accurate fit
+            if len(current_inliers) > N_samples:
+                 m_refined, c_refined = np.polyfit(current_inliers[:, 0], current_inliers[:, 1], deg=1)
+                 best_model = (m_refined, c_refined)
+            else:
+                 best_model = (m, c)
+            best_inliers = current_inliers
+             
+            print(f"Best model: slope={best_model[0]:.3f}, intercept={best_model[1]:.3f}")
+            print(f"Number of inliers found: {len(best_inliers)}")
+
+            # Visualization (optional)
+            plt.scatter(x1[:, 0], x1[:, 1], label='Original Data')
+            if best_model:
+                m, c = best_model
+                X = np.linspace(min(x1[:, 0]), max(x1[:, 0]), 100)
+                plt.plot(X, m * X + c, color='red', label='RANSAC Line')
+                plt.scatter(best_inliers[:, 0], best_inliers[:, 1], edgecolors='green', facecolors='none', label='Inliers')
+            plt.legend()
+            plt.title('RANSAC Line Fitting')
+            plt.show()
+    
     return A
 
 def warp_image(img, A, output_size):
