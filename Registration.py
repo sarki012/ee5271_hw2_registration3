@@ -46,6 +46,7 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     max_inlier_count = 0
     N_samples = 3 
     A = np.eye(3) # Placeholder
+    A_matrix = np.eye(3) # Placeholder
     for i in range(ransac_iter):
         # Assume 'data' is a numpy array of your data points, e.g., shape (N_points, N_features)
         # N_samples is the minimum number of points needed to fit your specific model (e.g., 2 for a line, 3 for a plane)
@@ -86,6 +87,7 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
 
             # Visualization (optional)
             plt.scatter(x1[:, 0], x1[:, 1], label='Original Data')
+            plt.scatter(x2[:, 0], x2[:, 1], label='x2')
             if best_model:
                 m, c = best_model
                 X = np.linspace(min(x1[:, 0]), max(x1[:, 0]), 100)
@@ -95,8 +97,43 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
             plt.title('RANSAC Line Fitting')
             plt.show()
     
+    # Solve the least squares problem X * A = Y to find our transformation matrix A
+    # The result 'A' will be a 3x2 matrix representing the 6 affine parameters.
+    # The third column for homogeneous coordinates (0, 0, 1) is added later.
+    # Add a column of ones to x1 to handle the translation (bias) term
+    X = np.hstack([x1, np.ones((x1.shape[0], 1))])
+    A, residuals, rank, singular_values = np.linalg.lstsq(X, x2, rcond=None)
+
+    A = np.vstack([A.T, [[0, 0, 1]]])
+    print("Affine Transformation Matrix (M):\n", A)
     return A
 
+'''
+    # Create the A matrix for the linear system Ax = B
+    # Each point (x, y) adds two rows to A:
+    # [x, y, 1, 0, 0, 0] * [a, b, c, d, e, f]^T = x'
+    # [0, 0, 0, x, y, 1] * [a, b, c, d, e, f]^T = y'
+
+
+    A = np.zeros((6, 6), dtype=np.float32)
+    B = np.zeros((6, 1), dtype=np.float32)
+
+    for i in range(3):
+        x, y = x1[i]
+        xp, yp = x2[i]
+        
+        A[i*2] = [x, y, 1, 0, 0, 0]
+        B[i*2] = xp
+        
+        A[i*2 + 1] = [0, 0, 0, x, y, 1]
+        B[i*2 + 1] = yp
+
+
+        # Solve Ax = B for x
+        # Use np.linalg.solve for exactly 3 points
+       #x2 = np.linalg.solve(A, B)
+        #print("Affine Transformation Matrix (M):\n", A)
+        '''
 def warp_image(img, A, output_size):
     # To do
     return img_warped
