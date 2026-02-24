@@ -145,7 +145,6 @@ def warp_image(img, A, output_size):
 
     # Reshape the result back into the warped image's shape
     img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
-
     return img_warped
 
 '''
@@ -270,10 +269,28 @@ if __name__ == '__main__':
     ransac_iter = 1000
     A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
 
-    img_warped = warp_image(target_list[0], A, template.shape)
+    img_warped = warp_image(target_list[0], A, target_list[0].shape)
     plt.imshow(img_warped, cmap='gray', vmin=0, vmax=255)
     plt.axis('off')
     plt.show()
+# 1. Ensure images are the same size and data type
+    # Resizing the warped image to match the template dimensions if they differ
+    if template.shape != img_warped.shape:
+        img_warped = cv2.resize(img_warped, (template.shape[1], template.shape[0]), interpolation=cv2.INTER_AREA)
+    # 3. Compute the absolute difference
+    # Ensure images are the same data type (uint8) for cv2.absdiff
+    img_warped_uint8 = img_warped.astype(np.uint8)
+    # Compare the template with the warped image (aligned to template)
+    error_map = cv2.absdiff(template, img_warped_uint8)
+
+    # Apply a colormap (JET) to visualize errors in color
+    error_map_color = cv2.applyColorMap(error_map, cv2.COLORMAP_JET)
+
+    # Display the result
+    cv2.namedWindow("Error Map", cv2.WINDOW_GUI_NORMAL)
+    cv2.imshow("Error Map", error_map_color)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     A_refined, errors = align_image(template, target_list[0], A)
     visualize_align_image(template, target_list[0], A, A_refined, errors)
