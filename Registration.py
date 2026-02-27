@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from scipy import interpolate
 from scipy.interpolate import interpn
+import sympy
+import math
+
 
 
 def find_match(img1, img2):
@@ -106,12 +109,16 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     A, residuals, rank, singular_values = np.linalg.lstsq(X, x2, rcond=None)
 
     A = np.vstack([A.T, [[0, 0, 1]]])
-    print("Affine Transformation Matrix (M):\n", A)
+    print("Affine Transformation Matrix (A):\n", A)
     return A
 
 def warp_image(img, A, output_size):
     # To do
- # Calculate the inverse of A
+    '''
+    This function performs Inverse (Backward) Warping. It transforms the input image img into a new
+    image of size output_size based on the affine transformation matrix A.
+    '''
+    # Calculate the inverse of A
     A_inv = np.linalg.inv(A)   
     # Example: Create a sample original image (e.g., a gradient)
     # In a real scenario, this would be your loaded image data (grayscale for simplicity)
@@ -121,6 +128,10 @@ def warp_image(img, A, output_size):
 
     # Define the points/coordinates of the original image grid
     # interpn expects 1D arrays for each dimension's coordinates
+    '''
+    Defines the grid axes (y and x coordinates) of the input image. These are used by the
+    interpolator to know where the pixel data sits.
+    '''
     points = (np.arange(rows), np.arange(cols))
 
     # Assuming the warped image has the same dimensions as the original for simplicity
@@ -147,12 +158,189 @@ def warp_image(img, A, output_size):
     img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
     return img_warped
 
-'''
+def get_differential_filter():
+    # To do
+    # Flip the Sobel kernels along the x-and-y axes
+    filter_x = [
+        [-1, 0, 1],
+        [-2, 0, 2],
+        [-1, 0, 1]
+    ]
+    filter_x_flipped = [
+        [1, 0, -1],
+        [2, 0, -2],
+        [1, 0, -1]
+    ]
+    filter_y = [
+        [1, 2, 1],
+        [0, 0, 0],
+        [-1, -2, -1]
+    ]             
+    filter_y_flipped = [
+        [-1, -2, -1],
+        [0, 0, 0],
+        [1, 2, 1]
+    ]
+    return filter_x, filter_y
+
+
+def filter_image(im, filter):
+    # To do
+    # Unpack the shape into height and width
+    height, width = im.shape
+    im_filtered = np.zeros((height, width))
+    # Perform a convolution with the Sobel kernel to get the derivative. Iterate through
+    # the 3x3 kernel using indices k and l, multiply each element of the filter by the
+    # corresponding element on the image, sum the result and set equal to im_filtered[j , i]
+    for j in range(1, height - 1):
+        for i in range(1, width - 1):
+            sum_val = 0
+            for k in range(3):
+                for l in range(3):
+                    sum_val += im[j + k - 1, i + l - 1]*filter[k][l]
+            im_filtered[j, i] = sum_val
+    return im_filtered
+
+def get_gradient(im_dx, im_dy):
+    # To do
+    # Calculate the gradient magnitude and angle
+    grad_mag = np.zeros(im_dx.shape)
+    grad_angle = np.zeros(im_dx.shape)
+    for j in range(im_dx.shape[0]):
+        for i in range(im_dx.shape[1]):
+            # The magnitude of the gradient = sqrt(im_dx^2 + im_dy^2)
+            grad_mag[j, i] = math.sqrt(im_dx[j, i]**2 + im_dy[j, i]**2)
+            # The angle of the gradient = the inverse tan(im_dy/im_dx)
+            grad_angle[j, i] = math.atan2(im_dy[j, i], im_dx[j, i])
+            if grad_angle[j, i] < 0:
+                grad_angle[j, i] += math.pi    # Make the angle positive
+    return grad_mag, grad_angle
+
 def align_image(template, target, A):
     # To do
-    return A_refined
+    '''
+    A is the affine transformation matrix.
+    Image alignment consists of moving, and possibly deforming, a template to minimize the
+    difference between the template and an image.
+    '''
+    '''
+    The following line of code is responsible for converting the standard
+    3x3 affine transformation matrix A into a 6-element parameter vector p. 
+    This conversion is crucial for the iterative Inverse Compositional 
+    alignment algorithm.
+    1. Two Representations of an Affine Warp
+    There are different ways to represent the same 2D affine transformation.
+    The Standard Affine Matrix A calculates a standard 3x3 affine transformation matrix A in 
+    homogeneous coordinates. It looks like this:     
+    
+        [ a b tx ]
+    A = [ c d ty ]
+        [ 0 0 1  ]
 
+    Where a, b, c, d represent scaling, rotation, and shear, and tx, ty 
+    represent translation.
+    b) The Parameterized Warp W(x; p):
+    The Inverse Compositional algorithm works by iteratively updating a set 
+    of warp parameters, p. For an affine transformation, this is typically a 
+    6-element vector p = [p1, p2, p3, p4, p5, p6]. These parameters define a 
+    warp matrix W that is centered around the identity transformation 
+    (i.e., when p=0, W is the identity matrix). This specific parameterization 
+    is defined as:
 
+              [ 1+p1   p2   p3 ]
+    W(x; p) = [  p4   1+p5  p6 ]
+              [  0     0    1  ]
+
+    2. Mapping A to p
+    The following line of code initializes the parameter vector p for 
+    the iterative algorithm using the initial guess A that was found using 
+    feature matching. To do this, it equates the two matrix forms and solves 
+    for the p parameters:
+
+    A = W(x; p)
+
+    [ A[0,0]  A[0,1]  A[0,2] ]   [ 1+p1   p3   p5 ]
+    [ A[1,0]  A[1,1]  A[1,2] ] = [  p2   1+p4  p6 ]
+    [   0       0       1    ]   [  0     0    1  ]
+
+    By comparing the elements of these two matrices, we can derive the values for each 
+    of the 6 parameter in p:
+
+    A[0,0] = 1 + p1 => p1 = A[0,0] - 1
+    A[1,0] = p2 => p2 = A[1,0]
+    A[0,1] = p3 => p3 = A[0,1]
+    A[1,1] = 1 + p4 => p4 = A[1,1] - 1
+    A[0,2] = p5 => p5 = A[0,2] (translation in x)
+    A[1,2] = p6 => p6 = A[1,2] (translation in y)
+    3. The Code Implementation
+    The Python code
+    p = np.array([A[0, 0] - 1, A[1, 0], A[0, 1], A[1, 1] - 1, A[0, 2], A[1, 2]]) 
+    directly implements these equations to create the initial parameter vector 
+    p0 from the input matrix A. The algorithm will then start from this p0 
+    and iteratively find small updates Δp to refine the alignment.
+    '''
+
+    filterx, filtery = get_differential_filter()
+    # Sobel filter, derivate in the x-direction
+    filtered_imagex = filter_image(template, filterx)
+    # Sobel filter, derivate in the y-direction
+    filtered_imagey = filter_image(template, filtery)
+    grad = get_gradient(filtered_imagex, filtered_imagey)
+
+    # 1. Coordinate grid
+    h, w = template.shape
+    y, x = np.mgrid[0:h, 0:w]
+
+    # 2. Analytical Jacobian of the affine warp W(x;p) w.r.t p
+    # Shape: (h, w, 2, 6)
+    # J = [[x, 0, y, 0, 1, 0],
+    #      [0, x, 0, y, 0, 1]]
+    jacobian = np.zeros((h, w, 2, 6))
+    jacobian[:, :, 0, 0] = x
+    jacobian[:, :, 0, 2] = y
+    jacobian[:, :, 0, 4] = 1
+    jacobian[:, :, 1, 1] = x
+    jacobian[:, :, 1, 3] = y
+    jacobian[:, :, 1, 5] = 1
+
+    # 3. Compute Steepest Descent Images: VT * dW/dp
+    # Gradient stack: (h, w, 2)
+    grad_stack = np.stack((filtered_imagex, filtered_imagey), axis=2)
+    # Einsum: multiply (h,w,2) by (h,w,2,6) summing over the coordinate dim (2) -> (h,w,6)
+    steepest_descent_images = np.einsum('ijk,ijkl->ijl', grad_stack, jacobian)
+
+    # 4. Compute Hessian
+    H = np.einsum('ijk,ijl->kl', steepest_descent_images, steepest_descent_images)
+    H_inv = np.linalg.inv(H)
+
+    # 5. Optimization Loop
+    A_refined = A.copy()
+    errors = []
+    max_iter = 100
+
+    for i in range(max_iter):
+        warped_target = warp_image(target, A_refined, (h, w))
+        error_img = warped_target.astype(np.float32) - template.astype(np.float32)
+        errors.append(np.mean(error_img**2))
+
+        sd_update = np.einsum('ijk,ij->k', steepest_descent_images, error_img)
+        delta_p = H_inv @ sd_update
+
+        # Construct Delta_M from delta_p
+        delta_M = np.array([
+            [1 + delta_p[0], delta_p[2], delta_p[4]],
+            [delta_p[1], 1 + delta_p[3], delta_p[5]],
+            [0, 0, 1]
+        ])
+        
+        A_refined = A_refined @ np.linalg.inv(delta_M)
+
+        if np.linalg.norm(delta_p) < 1e-2:
+            print(f"Delta_p = {delta_p}.")
+            break
+    return A_refined, np.array(errors)
+
+'''
 def track_multi_frames(template, img_list):
     # To do
     return A_list
