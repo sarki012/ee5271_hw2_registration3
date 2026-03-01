@@ -100,49 +100,7 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     print("Affine Transformation Matrix (A):\n", A)
     return A
 
-def warp_image(img, A, output_size):
-    # To do
-    '''
-    This function performs Inverse (Backward) Warping. It transforms the input image img into a new
-    image of size output_size based on the affine transformation matrix A.
-    '''
-    # Example: Create a sample original image (e.g., a gradient)
-    # In a real scenario, this would be your loaded image data (grayscale for simplicity)
-    # Shape of image: (rows, cols)
-    rows, cols = img.shape
-  #  original_image = np.indices((rows, cols), dtype=float)[0] + np.indices((rows, cols), dtype=float)[1]
 
-    # Define the points/coordinates of the original image grid
-    # interpn expects 1D arrays for each dimension's coordinates
-    '''
-    Defines the grid axes (y and x coordinates) of the input image. These are used by the
-    interpolator to know where the pixel data sits.
-    '''
-    points = (np.arange(rows), np.arange(cols))
-
-    # Assuming the warped image has the same dimensions as the original for simplicity
-    dest_rows, dest_cols = output_size
-    # Create a grid of destination coordinates
-    dest_coords_rows, dest_coords_cols = np.indices((dest_rows, dest_cols), dtype=float)
-    # Flatten destination coordinates and represent as homogeneous coordinates (x, y, 1)
-    dest_coords_flat = np.vstack((dest_coords_cols.flatten(), dest_coords_rows.flatten(), np.ones(dest_rows * dest_cols)))
-
-    # Apply inverse transformation
-    # The result will be source coordinates (x', y', w')
-    src_coords_flat_h = A @ dest_coords_flat
-
-    # Convert back from homogeneous coordinates if necessary (divide x', y' by w')
-    src_coords_cols_flat = src_coords_flat_h[0] / src_coords_flat_h[2]
-    src_coords_rows_flat = src_coords_flat_h[1] / src_coords_flat_h[2]
-
-    # Combine source coordinates into the format interpn expects: (npoints, ndims)
-    xi = np.vstack((src_coords_rows_flat, src_coords_cols_flat)).T
-    # Interpolate values
-    warped_values_flat = interpn(points, img, xi, method='linear', bounds_error=False, fill_value=0) #
-
-    # Reshape the result back into the warped image's shape
-    img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
-    return img_warped
 
 def get_differential_filter():
     # To do
@@ -201,6 +159,49 @@ def get_gradient(im_dx, im_dy):
             if grad_angle[j, i] < 0:
                 grad_angle[j, i] += math.pi    # Make the angle positive
     return grad_mag, grad_angle
+def warp_image(img, A, output_size):
+    # To do
+    '''
+    This function performs Inverse (Backward) Warping. It transforms the input image img into a new
+    image of size output_size based on the affine transformation matrix A.
+    '''
+    # Example: Create a sample original image (e.g., a gradient)
+    # In a real scenario, this would be your loaded image data (grayscale for simplicity)
+    # Shape of image: (rows, cols)
+    rows, cols = img.shape
+  #  original_image = np.indices((rows, cols), dtype=float)[0] + np.indices((rows, cols), dtype=float)[1]
+
+    # Define the points/coordinates of the original image grid
+    # interpn expects 1D arrays for each dimension's coordinates
+    '''
+    Defines the grid axes (y and x coordinates) of the input image. These are used by the
+    interpolator to know where the pixel data sits.
+    '''
+    points = (np.arange(rows), np.arange(cols))
+
+    # Assuming the warped image has the same dimensions as the original for simplicity
+    dest_rows, dest_cols = output_size
+    # Create a grid of destination coordinates
+    dest_coords_rows, dest_coords_cols = np.indices((dest_rows, dest_cols), dtype=float)
+    # Flatten destination coordinates and represent as homogeneous coordinates (x, y, 1)
+    dest_coords_flat = np.vstack((dest_coords_cols.flatten(), dest_coords_rows.flatten(), np.ones(dest_rows * dest_cols)))
+
+    # Apply inverse transformation
+    # The result will be source coordinates (x', y', w')
+    src_coords_flat_h = A @ dest_coords_flat
+
+    # Convert back from homogeneous coordinates if necessary (divide x', y' by w')
+    src_coords_cols_flat = src_coords_flat_h[0] / src_coords_flat_h[2]
+    src_coords_rows_flat = src_coords_flat_h[1] / src_coords_flat_h[2]
+
+    # Combine source coordinates into the format interpn expects: (npoints, ndims)
+    xi = np.vstack((src_coords_rows_flat, src_coords_cols_flat)).T
+    # Interpolate values
+    warped_values_flat = interpn(points, img, xi, method='linear', bounds_error=False, fill_value=0) #
+
+    # Reshape the result back into the warped image's shape
+    img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
+    return img_warped
 
 def align_image(template, target, A):
     # To do
@@ -331,11 +332,27 @@ def align_image(template, target, A):
 
     return A_refined, np.array(errors)
 
-'''
+
 def track_multi_frames(template, img_list):
-    # To do
+    ransac_thr = 5.0
+    ransac_iter = 1000
+    # 1. Initialize with the first frame
+    x1, x2 = find_match(template, img_list[0])
+    A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
+    
+    A_list = []
+    current_A = A
+
+    for img in img_list:
+        # 2. Track: Use previous A as guess for current frame
+        # align_image returns (A, errors), so we must unpack it
+        refined_A, errors = align_image(template, img, current_A)
+        A_list.append(refined_A)
+        # Update guess for next frame
+        current_A = refined_A
+        
     return A_list
-'''
+
 
 def visualize_find_match(img1, img2, x1, x2, img_h=500):
     assert x1.shape == x2.shape, 'x1 and x2 should have same shape!'
@@ -411,6 +428,7 @@ def visualize_track_multi_frames(template, img_list, A_list):
                                         [0, template.shape[0]], [0, 0]]), np.ones((5, 1)))) @ A[:2, :].T
         bbox_list.append(boundary_t)
 
+    plt.figure()
     plt.subplot(221)
     plt.imshow(img_list[0], cmap='gray')
     plt.plot(bbox_list[0][:, 0], bbox_list[0][:, 1], 'r')
@@ -471,8 +489,8 @@ if __name__ == '__main__':
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    A_refined, errors = align_image(template, target_list[0], A)
-    visualize_align_image(template, target_list[0], A, A_refined, errors)
+   # A_refined, errors = align_image(template, target_list[0], A)
+  #  visualize_align_image(template, target_list[0], A, A_refined, errors)
 
     A_list = track_multi_frames(template, target_list)
     visualize_track_multi_frames(template, target_list, A_list)
