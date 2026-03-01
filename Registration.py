@@ -320,7 +320,7 @@ def align_image(template, target, A):
 
     for i in range(max_iter):
         warped_target = warp_image(target, A_refined, (h, w))
-        error_img = warped_target.astype(np.float32) - template.astype(np.float32)
+        error_img = warped_target.astype(np.uint8) - template.astype(np.uint8)
         errors.append(np.mean(error_img**2))
 
         sd_update = np.einsum('ijk,ij->k', steepest_descent_images, error_img)
@@ -407,7 +407,7 @@ def visualize_align_image(template, target, A, A_refined, errors=None):
     plt.show()
 
     if errors is not None:
-        plt.plot(errors * 255)
+        plt.plot(errors)
         plt.xlabel('Iteration')
         plt.ylabel('Error')
         plt.show()
@@ -453,7 +453,7 @@ if __name__ == '__main__':
     x1, x2 = find_match(template, target_list[0])
     visualize_find_match(template, target_list[0], x1, x2)
 
-    ransac_thr = 5.0
+    ransac_thr = 10.0
     ransac_iter = 1000
     A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
 
