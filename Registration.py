@@ -39,55 +39,64 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     """
     RANSAC algorithm for Affine Transformation fitting.
     """
-    best_inliers_mask = np.zeros(len(x1), dtype=bool)
+    best_inliers_mask = None
     max_inlier_count = 0
     N_samples = 3 
-    
+
     for i in range(ransac_iter):
         # 1. Select random samples
         idx = np.random.choice(len(x1), N_samples, replace=False)
-        src_points = x1[idx].astype(np.float32)
-        dst_points = x2[idx].astype(np.float32)
+        pts1 = x1[idx]
+        pts2 = x2[idx]
         
-        # 2. Fit model (Affine)
+        # 2. Fit Affine Model to 3 points
+        # We want M such that pts2 = M * pts1 (in homogeneous coordinates)
+        # X * A_T = Y  =>  A_T = inv(X) * Y
+        X = np.hstack((pts1, np.ones((3, 1))))
+        Y = pts2
+        
         try:
-            M = cv2.getAffineTransform(src_points, dst_points)
-        except cv2.error:
+            if np.linalg.matrix_rank(X) < 3:
+                continue
+            A_T = np.linalg.solve(X, Y)
+            M = A_T.T # 2x3 matrix
+        except np.linalg.LinAlgError:
             continue
         
         # 3. Count inliers
         # Transform all x1 points using M
-        x1_h = np.hstack([x1, np.ones((len(x1), 1))]) # (N, 3)
-        x2_pred = x1_h @ M.T # (N, 3) @ (3, 2) -> (N, 2)
+        X_all = np.hstack((x1, np.ones((len(x1), 1))))
+        x2_pred = X_all @ M.T
         
-        # Distances
         diff = x2 - x2_pred
         distances = np.linalg.norm(diff, axis=1)
         
-        inlier_mask = distances < ransac_thr
-        num_inliers = np.sum(inlier_mask)
+        inliers_mask = distances < ransac_thr
+        num_inliers = np.sum(inliers_mask)
         
         if num_inliers > max_inlier_count:
             max_inlier_count = num_inliers
-            best_inliers_mask = inlier_mask
+            best_inliers_mask = inliers_mask
     
-    # Re-fit using all best inliers
-    if np.sum(best_inliers_mask) >= 3:
-        src_inliers = x1[best_inliers_mask]
-        dst_inliers = x2[best_inliers_mask]
+    # Re-fit with all inliers
+    if best_inliers_mask is not None and max_inlier_count >= 3:
+        inlier_x1 = x1[best_inliers_mask]
+        inlier_x2 = x2[best_inliers_mask]
         
-        # Least squares for Affine
-        X = np.hstack([src_inliers, np.ones((len(src_inliers), 1))])
-        Y = dst_inliers
+        X = np.hstack((inlier_x1, np.ones((len(inlier_x1), 1))))
+        Y = inlier_x2
         
+        # Least squares
         res = np.linalg.lstsq(X, Y, rcond=None)
-        A_affine = res[0].T # (2, 3)
+        A_T = res[0]
+        A_affine = A_T.T
         
-        A = np.vstack([A_affine, [0, 0, 1]])
+        A = np.vstack((A_affine, [0, 0, 1]))
     else:
+        print("RANSAC failed.")
         A = np.eye(3)
         
-    print(f"Number of inliers found: {np.sum(best_inliers_mask)}")
+    print(f"Number of inliers found: {max_inlier_count}")
     print("Affine Transformation Matrix (A):\n", A)
     return A
 
@@ -97,8 +106,6 @@ def warp_image(img, A, output_size):
     This function performs Inverse (Backward) Warping. It transforms the input image img into a new
     image of size output_size based on the affine transformation matrix A.
     '''
-    # Calculate the inverse of A
-    A_inv = np.linalg.inv(A)   
     # Example: Create a sample original image (e.g., a gradient)
     # In a real scenario, this would be your loaded image data (grayscale for simplicity)
     # Shape of image: (rows, cols)
@@ -122,7 +129,7 @@ def warp_image(img, A, output_size):
 
     # Apply inverse transformation
     # The result will be source coordinates (x', y', w')
-    src_coords_flat_h = A_inv @ dest_coords_flat
+    src_coords_flat_h = A @ dest_coords_flat
 
     # Convert back from homogeneous coordinates if necessary (divide x', y' by w')
     src_coords_cols_flat = src_coords_flat_h[0] / src_coords_flat_h[2]
@@ -151,9 +158,9 @@ def get_differential_filter():
         [1, 0, -1]
     ]
     filter_y = [
-        [1, 2, 1],
+        [-1, -2, -1],
         [0, 0, 0],
-        [-1, -2, -1]
+        [1, 2, 1]
     ]             
     filter_y_flipped = [
         [-1, -2, -1],
@@ -295,13 +302,17 @@ def align_image(template, target, A):
     # 5. Optimization Loop
     A_refined = A.copy()
     errors = []
-    max_iter = 100
+    max_iter = 75
 
     for i in range(max_iter):
         warped_target = warp_image(target, A_refined, (h, w))
         error_img = warped_target.astype(np.uint8) - template.astype(np.uint8)
         errors.append(np.mean(error_img**2))
-
+        '''
+        This vector represents how much the error would change if you tweaked each of the
+        6 affine parameters. It is subsequently multiplied by the Inverse Hessian (H_inv)
+        to determine the actual step size (delta_p) for the current iteration.
+        '''
         sd_update = np.einsum('ijk,ij->k', steepest_descent_images, error_img)
         delta_p = H_inv @ sd_update
 
@@ -314,9 +325,10 @@ def align_image(template, target, A):
         
         A_refined = A_refined @ np.linalg.inv(delta_M)
 
-        if np.linalg.norm(delta_p) < 1e-2:
+        if np.linalg.norm(delta_p) < 9e-2:
             print(f"Delta_p = {delta_p}.")
             break
+
     return A_refined, np.array(errors)
 
 '''
@@ -325,34 +337,20 @@ def track_multi_frames(template, img_list):
     return A_list
 '''
 
-def visualize_find_match(img1, img2, x1, x2, A=None, img_h=500):
+def visualize_find_match(img1, img2, x1, x2, img_h=500):
     assert x1.shape == x2.shape, 'x1 and x2 should have same shape!'
     scale_factor1 = img_h/img1.shape[0]
     scale_factor2 = img_h/img2.shape[0]
     img1_resized = cv2.resize(img1, None, fx=scale_factor1, fy=scale_factor1)
     img2_resized = cv2.resize(img2, None, fx=scale_factor2, fy=scale_factor2)
-    x1_disp = x1 * scale_factor1
-    x2_disp = x2 * scale_factor2
-    x2_disp[:, 0] += img1_resized.shape[1]
+    x1 = x1 * scale_factor1
+    x2 = x2 * scale_factor2
+    x2[:, 0] += img1_resized.shape[1]
     img = np.hstack((img1_resized, img2_resized))
     plt.imshow(img, cmap='gray', vmin=0, vmax=255)
-
-    inliers = np.ones(x1.shape[0], dtype=bool)
-    if A is not None:
-        X = np.hstack([x1, np.ones((x1.shape[0], 1))])
-        # A is 3x3. x2_pred = X @ A_affine_part.T
-        # A[:2, :] contains the affine part [a b tx; c d ty]
-        x2_pred = X @ A[:2, :].T
-        errors = np.linalg.norm(x2 - x2_pred, axis=1)
-        inliers = errors < 10
-
     for i in range(x1.shape[0]):
-        if inliers[i]:
-            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'b', linewidth=0.5)
-            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'bo', markersize=2)
-        else:
-            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'r', linewidth=0.5)
-            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'ro', markersize=2)
+        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'b')
+        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'bo')
     plt.axis('off')
     plt.show()
 
@@ -400,7 +398,7 @@ def visualize_align_image(template, target, A, A_refined, errors=None):
     plt.show()
 
     if errors is not None:
-        plt.plot(errors)
+        plt.plot(errors * 255)
         plt.xlabel('Iteration')
         plt.ylabel('Error')
         plt.show()
@@ -444,11 +442,11 @@ if __name__ == '__main__':
         target_list.append(target)
 
     x1, x2 = find_match(template, target_list[0])
+    visualize_find_match(template, target_list[0], x1, x2)
 
-    ransac_thr = 10.0
+    ransac_thr = 5.0
     ransac_iter = 1000
     A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
-    visualize_find_match(template, target_list[0], x1, x2, A)
 
     img_warped = warp_image(target_list[0], A, target_list[0].shape)
     plt.imshow(img_warped, cmap='gray', vmin=0, vmax=255)
