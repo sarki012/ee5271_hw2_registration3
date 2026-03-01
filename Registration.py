@@ -37,78 +37,57 @@ def find_match(img1, img2):
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     # To do
     """
-    RANSAC algorithm for 2D line fitting.
-    
-    :param data: A numpy array of shape (N, 2) where N is the number of points.
-    :param min_samples: Minimum number of samples to draw to fit a model (e.g., 2 for a line).
-    :param threshold: Maximum distance for a point to be considered an inlier.
-    :param max_iterations: Maximum number of iterations to run RANSAC.
-    :return: The best model parameters (slope, intercept) and the set of inliers.
+    RANSAC algorithm for Affine Transformation fitting.
     """
-    best_model = None
-    best_inliers = np.array([])
+    best_inliers_mask = np.zeros(len(x1), dtype=bool)
     max_inlier_count = 0
     N_samples = 3 
-    A = np.eye(3) # Placeholder
-    A_matrix = np.eye(3) # Placeholder
-    for i in range(ransac_iter):
-        # Assume 'data' is a numpy array of your data points, e.g., shape (N_points, N_features)
-        # N_samples is the minimum number of points needed to fit your specific model (e.g., 2 for a line, 3 for a plane)
-        # Get the indices of the data points
-        sample_indices = np.random.choice(len(x1), N_samples, replace=False)
-        sample = x1[sample_indices]
-        # Get the actual data points corresponding to these indices
-        random_subset = x1[sample_indices]
-        # np.polyfit returns the slope and intercept of the line that best fits these points
-        try:
-            m, c = np.polyfit(random_subset[:, 0], random_subset[:, 1], deg=1)
-        except np.linalg.LinAlgError:
-            # Handle cases where sample points are e.g. vertical, causing fit errors
-            continue
-        # 3. Determine inliers based on the current model and threshold
-        # Calculate residuals (distances) for all points
-        y_predicted = m * x1[:, 0] + c
-        # Use absolute difference as a distance metric
-        distances = np.abs(x1[:, 1] - y_predicted)
-        
-        current_inliers_mask = distances < ransac_thr
-        current_inliers = x1[current_inliers_mask]
-        inlier_count = len(current_inliers)
-
-        # 4. Check if this model is better than the best so far
-        if inlier_count > max_inlier_count:
-            max_inlier_count = inlier_count
-            # Retrain model with all current inliers for a more accurate fit
-            if len(current_inliers) > N_samples:
-                 m_refined, c_refined = np.polyfit(current_inliers[:, 0], current_inliers[:, 1], deg=1)
-                 best_model = (m_refined, c_refined)
-            else:
-                 best_model = (m, c)
-            best_inliers = current_inliers
-             
-            print(f"Best model: slope={best_model[0]:.3f}, intercept={best_model[1]:.3f}")
-            print(f"Number of inliers found: {len(best_inliers)}")
-
-            # Visualization (optional)
-            plt.scatter(x1[:, 0], x1[:, 1], label='Original Data')
-            plt.scatter(x2[:, 0], x2[:, 1], label='x2')
-            if best_model:
-                m, c = best_model
-                X = np.linspace(min(x1[:, 0]), max(x1[:, 0]), 100)
-                plt.plot(X, m * X + c, color='red', label='RANSAC Line')
-                plt.scatter(best_inliers[:, 0], best_inliers[:, 1], edgecolors='green', facecolors='none', label='Inliers')
-            plt.legend()
-            plt.title('RANSAC Line Fitting')
-            plt.show()
     
-    # Solve the least squares problem X * A = Y to find our transformation matrix A
-    # The result 'A' will be a 3x2 matrix representing the 6 affine parameters.
-    # The third column for homogeneous coordinates (0, 0, 1) is added later.
-    # Add a column of ones to x1 to handle the translation (bias) term
-    X = np.hstack([x1, np.ones((x1.shape[0], 1))])
-    A, residuals, rank, singular_values = np.linalg.lstsq(X, x2, rcond=None)
-
-    A = np.vstack([A.T, [[0, 0, 1]]])
+    for i in range(ransac_iter):
+        # 1. Select random samples
+        idx = np.random.choice(len(x1), N_samples, replace=False)
+        src_points = x1[idx].astype(np.float32)
+        dst_points = x2[idx].astype(np.float32)
+        
+        # 2. Fit model (Affine)
+        try:
+            M = cv2.getAffineTransform(src_points, dst_points)
+        except cv2.error:
+            continue
+        
+        # 3. Count inliers
+        # Transform all x1 points using M
+        x1_h = np.hstack([x1, np.ones((len(x1), 1))]) # (N, 3)
+        x2_pred = x1_h @ M.T # (N, 3) @ (3, 2) -> (N, 2)
+        
+        # Distances
+        diff = x2 - x2_pred
+        distances = np.linalg.norm(diff, axis=1)
+        
+        inlier_mask = distances < ransac_thr
+        num_inliers = np.sum(inlier_mask)
+        
+        if num_inliers > max_inlier_count:
+            max_inlier_count = num_inliers
+            best_inliers_mask = inlier_mask
+    
+    # Re-fit using all best inliers
+    if np.sum(best_inliers_mask) >= 3:
+        src_inliers = x1[best_inliers_mask]
+        dst_inliers = x2[best_inliers_mask]
+        
+        # Least squares for Affine
+        X = np.hstack([src_inliers, np.ones((len(src_inliers), 1))])
+        Y = dst_inliers
+        
+        res = np.linalg.lstsq(X, Y, rcond=None)
+        A_affine = res[0].T # (2, 3)
+        
+        A = np.vstack([A_affine, [0, 0, 1]])
+    else:
+        A = np.eye(3)
+        
+    print(f"Number of inliers found: {np.sum(best_inliers_mask)}")
     print("Affine Transformation Matrix (A):\n", A)
     return A
 
@@ -346,20 +325,34 @@ def track_multi_frames(template, img_list):
     return A_list
 '''
 
-def visualize_find_match(img1, img2, x1, x2, img_h=500):
+def visualize_find_match(img1, img2, x1, x2, A=None, img_h=500):
     assert x1.shape == x2.shape, 'x1 and x2 should have same shape!'
     scale_factor1 = img_h/img1.shape[0]
     scale_factor2 = img_h/img2.shape[0]
     img1_resized = cv2.resize(img1, None, fx=scale_factor1, fy=scale_factor1)
     img2_resized = cv2.resize(img2, None, fx=scale_factor2, fy=scale_factor2)
-    x1 = x1 * scale_factor1
-    x2 = x2 * scale_factor2
-    x2[:, 0] += img1_resized.shape[1]
+    x1_disp = x1 * scale_factor1
+    x2_disp = x2 * scale_factor2
+    x2_disp[:, 0] += img1_resized.shape[1]
     img = np.hstack((img1_resized, img2_resized))
     plt.imshow(img, cmap='gray', vmin=0, vmax=255)
+
+    inliers = np.ones(x1.shape[0], dtype=bool)
+    if A is not None:
+        X = np.hstack([x1, np.ones((x1.shape[0], 1))])
+        # A is 3x3. x2_pred = X @ A_affine_part.T
+        # A[:2, :] contains the affine part [a b tx; c d ty]
+        x2_pred = X @ A[:2, :].T
+        errors = np.linalg.norm(x2 - x2_pred, axis=1)
+        inliers = errors < 10
+
     for i in range(x1.shape[0]):
-        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'b')
-        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'bo')
+        if inliers[i]:
+            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'b', linewidth=0.5)
+            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'bo', markersize=2)
+        else:
+            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'r', linewidth=0.5)
+            plt.plot([x1_disp[i, 0], x2_disp[i, 0]], [x1_disp[i, 1], x2_disp[i, 1]], 'ro', markersize=2)
     plt.axis('off')
     plt.show()
 
@@ -451,11 +444,11 @@ if __name__ == '__main__':
         target_list.append(target)
 
     x1, x2 = find_match(template, target_list[0])
-    visualize_find_match(template, target_list[0], x1, x2)
 
     ransac_thr = 10.0
     ransac_iter = 1000
     A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
+    visualize_find_match(template, target_list[0], x1, x2, A)
 
     img_warped = warp_image(target_list[0], A, target_list[0].shape)
     plt.imshow(img_warped, cmap='gray', vmin=0, vmax=255)
