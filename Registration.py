@@ -165,42 +165,29 @@ def warp_image(img, A, output_size):
     This function performs Inverse (Backward) Warping. It transforms the input image img into a new
     image of size output_size based on the affine transformation matrix A.
     '''
-    # Example: Create a sample original image (e.g., a gradient)
-    # In a real scenario, this would be your loaded image data (grayscale for simplicity)
-    # Shape of image: (rows, cols)
-    rows, cols = img.shape
-  #  original_image = np.indices((rows, cols), dtype=float)[0] + np.indices((rows, cols), dtype=float)[1]
+    h_dest, w_dest = output_size
+    h_src, w_src = img.shape
 
     # Define the points/coordinates of the original image grid
     # interpn expects 1D arrays for each dimension's coordinates
-    '''
-    Defines the grid axes (y and x coordinates) of the input image. These are used by the
-    interpolator to know where the pixel data sits.
-    '''
-    points = (np.arange(rows), np.arange(cols))
+    points = (np.arange(h_src), np.arange(w_src))
 
-    # Assuming the warped image has the same dimensions as the original for simplicity
-    dest_rows, dest_cols = output_size
-    # Create a grid of destination coordinates
-    dest_coords_rows, dest_coords_cols = np.indices((dest_rows, dest_cols), dtype=float)
-    # Flatten destination coordinates and represent as homogeneous coordinates (x, y, 1)
-    dest_coords_flat = np.vstack((dest_coords_cols.flatten(), dest_coords_rows.flatten(), np.ones(dest_rows * dest_cols)))
+    # Create a grid of coordinates for the destination image
+    dest_coords_rows, dest_coords_cols = np.indices((h_dest, w_dest), dtype=float)
+    
+    # Flatten and create homogeneous coordinates (x, y, 1)
+    dest_coords_flat = np.vstack((dest_coords_cols.flatten(), dest_coords_rows.flatten(), np.ones(h_dest * w_dest)))
 
-    # Apply inverse transformation
-    # The result will be source coordinates (x', y', w')
-    src_coords_flat_h = A @ dest_coords_flat
+    # Apply the affine transformation to find corresponding source coordinates
+    src_coords_flat = A @ dest_coords_flat
 
-    # Convert back from homogeneous coordinates if necessary (divide x', y' by w')
-    src_coords_cols_flat = src_coords_flat_h[0] / src_coords_flat_h[2]
-    src_coords_rows_flat = src_coords_flat_h[1] / src_coords_flat_h[2]
+    # Combine source coordinates into the format interpn expects: (npoints, ndims) -> (y, x)
+    xi = np.vstack((src_coords_flat[1], src_coords_flat[0])).T
 
-    # Combine source coordinates into the format interpn expects: (npoints, ndims)
-    xi = np.vstack((src_coords_rows_flat, src_coords_cols_flat)).T
     # Interpolate values
-    warped_values_flat = interpn(points, img, xi, method='linear', bounds_error=False, fill_value=0) #
+    warped_values_flat = interpn(points, img, xi, method='linear', bounds_error=False, fill_value=0)
 
-    # Reshape the result back into the warped image's shape
-    img_warped = warped_values_flat.reshape((dest_rows, dest_cols))
+    img_warped = warped_values_flat.reshape((h_dest, w_dest))
     return img_warped
 
 def align_image(template, target, A):
@@ -478,16 +465,7 @@ if __name__ == '__main__':
     # Ensure images are the same data type (uint8) for cv2.absdiff
     img_warped_uint8 = img_warped.astype(np.uint8)
     # Compare the template with the warped image (aligned to template)
-    error_map = cv2.absdiff(template, img_warped_uint8)
-
-    # Apply a colormap (JET) to visualize errors in color
-    error_map_color = cv2.applyColorMap(error_map, cv2.COLORMAP_JET)
-
-    # Display the result
-    cv2.namedWindow("Error Map", cv2.WINDOW_GUI_NORMAL)
-    cv2.imshow("Error Map", error_map_color)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+  #  error_map = cv2.absdiff(template, img_warped_uint8)
 
    # A_refined, errors = align_image(template, target_list[0], A)
   #  visualize_align_image(template, target_list[0], A, A_refined, errors)
