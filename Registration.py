@@ -294,7 +294,7 @@ def align_image(template, target, A):
 
     for i in range(max_iter):
         warped_target = warp_image(target, A_refined, (h, w))
-        error_img = warped_target.astype(np.uint8) - template.astype(np.uint8)
+        error_img = warped_target.astype(np.float32) - template.astype(np.float32)
         errors.append(np.mean(error_img**2))
         '''
         This vector represents how much the error would change if you tweaked each of the
@@ -337,6 +337,8 @@ def track_multi_frames(template, img_list):
         A_list.append(refined_A)
         # Update guess for next frame
         current_A = refined_A
+        # Update template
+        template = warp_image(template, refined_A, template.shape)
         
     return A_list
 
