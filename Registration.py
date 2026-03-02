@@ -322,24 +322,23 @@ def align_image(template, target, A):
 
 def track_multi_frames(template, img_list):
     ransac_thr = 5.0
-    ransac_iter = 1000
-    # 1. Initialize with the first frame
-    x1, x2 = find_match(template, img_list[0])
-    A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
-    
+    ransac_iter = 1000    
     A_list = []
     current_A = A
-
+    template2 = template.copy()
+    i = 0
     for img in img_list:
+        # 1. Initialize with the first frame
+        x1, x2 = find_match(template, img)
+        current_A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
         # 2. Track: Use previous A as guess for current frame
         # align_image returns (A, errors), so we must unpack it
-        refined_A, errors = align_image(template, img, current_A)
+        refined_A, errors = align_image(template2, img, current_A)
         A_list.append(refined_A)
         # Update guess for next frame
         current_A = refined_A
         # Update template
-        template = warp_image(template, refined_A, template.shape)
-        
+        template2 = warp_image(template, refined_A, template.shape)
     return A_list
 
 
