@@ -19,33 +19,62 @@ def find_match(img1, img2):
     # To do
     # Create a SIFT (Scale-Invariant Feature Transform) object
     sift = cv2.SIFT_create()   
-    # The variables keypoints hold the x-and-y coordinates of key points
-    # Descriptors are 128-dimensional feature descriptor vectors
-    keypoints1, descriptors1 = sift.detectAndCompute(img1, None)
-    keypoints2, descriptors2 = sift.detectAndCompute(img2, None)
+    '''
+    sift.detectAndCompute: locates keypoints and calculates feature descriptors, which are
+    128-dimensional vector
+    
+    Finds keypoints in both images and calculates 
+    a mathematical description ("descriptor") for the area around each point.
+    Keypoints: The (x, y) coordinates of corners, blobs, or distinct features.
+    Descriptors: 128-dimensional vectors that are a histogram of image gradients.
+    '''
+    keypts1, descript1 = sift.detectAndCompute(img1, None)
+    keypts2, descript2 = sift.detectAndCompute(img2, None)
 
-    neighbors = NearestNeighbors(n_neighbors=2).fit(descriptors2)
-    distances, indices = neighbors.kneighbors(descriptors1)
+    '''
+    find the 2 closest matches in img2 for every feature in img1.
+    neighbors.fit(descriptors2): Prepares the descriptors from the second image for searching.
+    neighbors.kneighbors(descriptors1): For every descriptor in img1, it finds the two most 
+    similar descriptors in img2 based on Euclidean distance.
+    distance is a 2D array with dimensions (Number of Keypoints in Image 1, 2).
+    '''
+    neighbors = NearestNeighbors(n_neighbors=2).fit(descript2)
+    distance, x_y = neighbors.kneighbors(descript1)
 
-    x1, x2 = [], []
-    for i in range(len(distances)):
-        if distances[i][0] < 0.7 * distances[i][1]:
-            x1.append(keypoints1[i].pt)
-            x2.append(keypoints2[indices[i][0]].pt)
-    return np.array(x1), np.array(x2)
+    '''
+    The following code compares the distance of the best match (distance[i][0]) to the 
+    second-best match (distance[i][1]). If the best match is much closer 
+    (less than 0.7*distance) than the second-best, it is a match. If the distances are 
+    similar (ratio >= 0.75), it means the feature in img1 is similar to multiple features 
+    in img2, so there is no match.
+    Euclidean distance refers to the similarity between the feature descriptors
+    distance[i][0] is the Euclidean distance to the closest match in Image 2.
+    distance[i][1] is the Euclidean distance to the second closest match in Image 2.
+    These values represent how "similar" the features are. A smaller distance means a 
+    better match.
+    '''
+    x1 = []
+    x2 = []
+    for i in range(len(distance)):
+        if distance[i][0] < 0.75 * distance[i][1]:
+            x1.append(keypts1[i].pt)    # match found, extracts just the location data   
+            x2.append(keypts2[x_y[i][0]].pt)
+    x_array1 = np.array(x1)
+    x_array2 = np.array(x2)
+    return x_array1, x_array2
 
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     # To do
     """
-    RANSAC algorithm for Affine Transformation fitting.
+    RANSAC algorithm for Affine Transformation fitting. 
     """
     best_inliers_mask = None
     max_inlier_count = 0
-    N_samples = 3 
+    num_samples = 3 
 
     for i in range(ransac_iter):
         # 1. Select random samples
-        idx = np.random.choice(len(x1), N_samples, replace=False)
+        idx = np.random.choice(len(x1), num_samples, replace=False)
         pts1 = x1[idx]
         pts2 = x2[idx]
         
