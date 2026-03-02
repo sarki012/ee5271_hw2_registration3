@@ -71,36 +71,44 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     best_inliers_mask = None
     max_inlier_count = 0
     num_samples = 3 
-
+    '''
+    The goal is to find the best 2D transformation (rotation, scale, translation, shear) 
+    that aligns the points in x1 with the points in x2, even if many of the initial matches 
+    are incorrect (outliers).
+    '''
     for i in range(ransac_iter):
         # 1. Select random samples
-        idx = np.random.choice(len(x1), num_samples, replace=False)
-        pts1 = x1[idx]
-        pts2 = x2[idx]
+        index = np.random.choice(len(x1), num_samples, replace=False)
+        points1 = x1[index]
+        points2 = x2[index]
         
-        # 2. Fit Affine Model to 3 points
-        # We want M such that pts2 = M * pts1 (in homogeneous coordinates)
-        # X * A_T = Y  =>  A_T = inv(X) * Y
-        X = np.hstack((pts1, np.ones((3, 1))))
-        Y = pts2
-        
+        '''
+         2. Fit Affine Model to 3 points
+        # We want AFFINE_TEMP such that points2 = AFFINE_TEMP * points1 (in homogeneous coordinates)
+        # X_ARRAY * AFFINE_TRANSPOSE = Y_ARRAY  =>  AFFINE_TRANSPOSE = inv(X_ARRAY) * Y_ARRAY
+        It calculates a temporary 2x3 affine matrix AFFINE_TEMP that perfectly maps the 3 
+        randomly chosen source points (pts1) to their corresponding target points (pts2). This 
+        is done by solving the linear system Y = AFFINE_TEMP * X_ARRAY.
+        '''
+        X_ARRAY = np.hstack((points1, np.ones((3, 1))))
+        Y_ARRAY = points2
         try:
-            if np.linalg.matrix_rank(X) < 3:
+            if np.linalg.matrix_rank(X_ARRAY) < 3:
                 continue
-            A_T = np.linalg.solve(X, Y)
-            M = A_T.T # 2x3 matrix
+            AFFINE_TRANSPOSE = np.linalg.solve(X_ARRAY, Y_ARRAY)
+            AFFINE_TEMP = AFFINE_TRANSPOSE.T # 2x3 matrix
         except np.linalg.LinAlgError:
             continue
         
         # 3. Count inliers
         # Transform all x1 points using M
         X_all = np.hstack((x1, np.ones((len(x1), 1))))
-        x2_pred = X_all @ M.T
+        x2_predicted = X_all @ AFFINE_TEMP.T
         
-        diff = x2 - x2_pred
-        distances = np.linalg.norm(diff, axis=1)
+        diff = x2 - x2_predicted
+        distance = np.linalg.norm(diff, axis=1)
         
-        inliers_mask = distances < ransac_thr
+        inliers_mask = distance < ransac_thr
         num_inliers = np.sum(inliers_mask)
         
         if num_inliers > max_inlier_count:
@@ -112,15 +120,15 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
         inlier_x1 = x1[best_inliers_mask]
         inlier_x2 = x2[best_inliers_mask]
         
-        X = np.hstack((inlier_x1, np.ones((len(inlier_x1), 1))))
-        Y = inlier_x2
+        X_ARRAY = np.hstack((inlier_x1, np.ones((len(inlier_x1), 1))))
+        Y_ARRAY = inlier_x2
         
         # Least squares
-        res = np.linalg.lstsq(X, Y, rcond=None)
-        A_T = res[0]
-        A_affine = A_T.T
+        res = np.linalg.lstsq(X_ARRAY, Y_ARRAY, rcond=None)
+        AFFINE_TRANSPOSE = res[0]
+        A_AFFINE = AFFINE_TRANSPOSE.T
         
-        A = np.vstack((A_affine, [0, 0, 1]))
+        A = np.vstack((A_AFFINE, [0, 0, 1]))
     else:
         print("RANSAC failed.")
         A = np.eye(3)
@@ -367,7 +375,7 @@ def track_multi_frames(template, img_list):
         # Update guess for next frame
         current_A = refined_A
         # Update template
-        template2 = warp_image(template, refined_A, template.shape)
+        template2 = warp_image(template, refined_A, template2.shape)
     return A_list
 
 
