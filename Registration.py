@@ -77,30 +77,30 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     are incorrect (outliers).
     '''
     for i in range(ransac_iter):
-        # 1. Select random samples
+        # Select random samples
         index = np.random.choice(len(x1), num_samples, replace=False)
         points1 = x1[index]
         points2 = x2[index]
         
         '''
-         2. Fit Affine Model to 3 points
-        # We want AFFINE_TEMP such that points2 = AFFINE_TEMP * points1 (in homogeneous coordinates)
-        # X_ARRAY * AFFINE_TRANSPOSE = Y_ARRAY  =>  AFFINE_TRANSPOSE = inv(X_ARRAY) * Y_ARRAY
+        Fit Affine Model to 3 points
+        We want AFFINE_TEMP such that points2 = AFFINE_TEMP * points1 (in homogeneous coordinates)
+        X_ARRAY * AFFINE_TRANSPOSE = Y_ARRAY  =>  AFFINE_TRANSPOSE = inv(X_ARRAY) * Y_ARRAY
         It calculates a temporary 2x3 affine matrix AFFINE_TEMP that perfectly maps the 3 
         randomly chosen source points (pts1) to their corresponding target points (pts2). This 
-        is done by solving the linear system Y = AFFINE_TEMP * X_ARRAY.
+        is done by solving the linear system Y_ARRAY = AFFINE_TEMP * X_ARRAY.
         '''
-        X_ARRAY = np.hstack((points1, np.ones((3, 1))))
+        X_ARRAY = np.hstack((points1, np.ones((3, 1))))     # Inserts a column of 1's (x, y, 1), homogenous coordinates
         Y_ARRAY = points2
         try:
-            if np.linalg.matrix_rank(X_ARRAY) < 3:
+            if np.linalg.matrix_rank(X_ARRAY) < 3:      #
                 continue
             AFFINE_TRANSPOSE = np.linalg.solve(X_ARRAY, Y_ARRAY)
             AFFINE_TEMP = AFFINE_TRANSPOSE.T # 2x3 matrix
         except np.linalg.LinAlgError:
             continue
         
-        # 3. Count inliers
+        # Count inliers
         # Transform all x1 points using M
         X_all = np.hstack((x1, np.ones((len(x1), 1))))
         x2_predicted = X_all @ AFFINE_TEMP.T
