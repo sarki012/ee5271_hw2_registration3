@@ -65,9 +65,12 @@ def find_match(img1, img2):
 
 def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     # To do
-    """
+    '''
     RANSAC algorithm for Affine Transformation fitting. 
-    """
+    '''
+    inliers = []
+    distance = []
+    num_inliers = 0
     best_inliers_mask = None
     max_inlier_count = 0
     num_samples = 3 
@@ -93,45 +96,81 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
         X_ARRAY = np.hstack((points1, np.ones((3, 1))))     # Inserts a column of 1's (x, y, 1), homogenous coordinates
         Y_ARRAY = points2
         try:
-            if np.linalg.matrix_rank(X_ARRAY) < 3:      #
+            if np.linalg.matrix_rank(X_ARRAY) < 3:    # Makes sure that all 3 points aren't on the same line
                 continue
             AFFINE_TRANSPOSE = np.linalg.solve(X_ARRAY, Y_ARRAY)
             AFFINE_TEMP = AFFINE_TRANSPOSE.T # 2x3 matrix
         except np.linalg.LinAlgError:
             continue
         
-        # Count inliers
-        # Transform all x1 points using M
+        '''
+        Transform all x1 points using M
+        Once a candidate transformation (AFFINE_TEMP) is calculated from the 3 random points, 
+        the code tests how well it works for all the other points. X_all becomes an (N, 3) 
+        matrix where every row is (x, y, 1).
+        X_all: The source points in homogeneous coordinates Nx3.
+        AFFINE_TEMP: The 2x3 affine matrix calculated from the random sample.
+        x2_predicted is an Nx2 matrix containing the predicted coordinates in the second image.
+        '''
         X_all = np.hstack((x1, np.ones((len(x1), 1))))
         x2_predicted = X_all @ AFFINE_TEMP.T
         
+        '''
+        x2: where the points are. x2_predicted: where the points should be.
+        If diff is small, count as an inlier.
+        '''
         diff = x2 - x2_predicted
         distance = np.linalg.norm(diff, axis=1)
         
-        inliers_mask = distance < ransac_thr
-        num_inliers = np.sum(inliers_mask)
-        
+        '''
+        Points with an error smaller than the threshold are marked as inliers. These are the "good" 
+        matches that agree with the current model.
+        distance: This is a 1D NumPy array containing the error for each point. The error is the 
+        pixel distance between where a point from the first image is predicted to be in the second 
+        image (using the temporary model AFFINE_TEMP) and where it actually is. 
+        inliers is a mask with 
+        '''
+        inliers = distance < ransac_thr     # inliers is a boolean mask, True if distance < ransac_thr
+        num_inliers = np.sum(inliers)
+
+        '''
+        It keeps track of the model that has the highest number of inliers. This is assumed to be 
+        the correct model. num_inliers and best_inliers are boolean masks with True at the index
+        where distance is < ransac_thr.
+        '''  
         if num_inliers > max_inlier_count:
             max_inlier_count = num_inliers
-            best_inliers_mask = inliers_mask
+            best_inliers = inliers
     
     # Re-fit with all inliers
-    if best_inliers_mask is not None and max_inlier_count >= 3:
-        inlier_x1 = x1[best_inliers_mask]
-        inlier_x2 = x2[best_inliers_mask]
+    if best_inliers is not None and max_inlier_count >= 3:
+        '''
+        It extracts the actual coordinates of all the "good" points (inlier_x1, inlier_x2) using 
+        the saved mask best_inliers.
+        '''
+        inlier_x1 = x1[best_inliers]
+        inlier_x2 = x2[best_inliers]
         
         X_ARRAY = np.hstack((inlier_x1, np.ones((len(inlier_x1), 1))))
         Y_ARRAY = inlier_x2
         
-        # Least squares
+        '''
+        It takes all the inliers found (which could be hundreds of points) and performs a 
+        Least Squares fit. Unlike solve (which hits 3 points exactly), lstsq finds the 
+        transformation that minimizes the average error across all valid points. This produces a 
+        much more accurate and stable matrix.
+        '''
         res = np.linalg.lstsq(X_ARRAY, Y_ARRAY, rcond=None)
         AFFINE_TRANSPOSE = res[0]
         A_AFFINE = AFFINE_TRANSPOSE.T
-        
+        '''
+        It formats the result into a standard 3x3 homogeneous affine matrix 
+        (adding [0, 0, 1] at the bottom) so it can be used for image warping later.
+        '''
         A = np.vstack((A_AFFINE, [0, 0, 1]))
     else:
         print("RANSAC failed.")
-        A = np.eye(3)
+        A = np.eye(3)       # Return identity matrix.
         
     print(f"Number of inliers found: {max_inlier_count}")
     print("Affine Transformation Matrix (A):\n", A)
