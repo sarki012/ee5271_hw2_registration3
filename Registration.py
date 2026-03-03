@@ -329,13 +329,6 @@ def align_image(template, target, A):
     and iteratively find small updates Δp to refine the alignment.
     '''
 
-    filterx, filtery = get_differential_filter()
-    # Sobel filter, derivate in the x-direction
-    filtered_imagex = filter_image(template, filterx)
-    # Sobel filter, derivate in the y-direction
-    filtered_imagey = filter_image(template, filtery)
-    grad = get_gradient(filtered_imagex, filtered_imagey)
-
     # 1. Coordinate grid
     h, w = template.shape
     y, x = np.mgrid[0:h, 0:w]
@@ -363,13 +356,32 @@ def align_image(template, target, A):
     jacobian[:, :, 1, 5] = p[5]
 
     # 3. Compute Steepest Descent Images: VT * dW/dp
+    filterx, filtery = get_differential_filter()
+    # Sobel filter, derivate in the x-direction
+    filtered_imagex = filter_image(template, filterx)
+    # Sobel filter, derivate in the y-direction
+    filtered_imagey = filter_image(template, filtery)
+    grad = get_gradient(filtered_imagex, filtered_imagey)
+    grad_mag = grad[0]
+    grad_angle = grad[1]
+
     # Gradient stack: (h, w, 2)
+
     grad_stack = np.stack((filtered_imagex, filtered_imagey), axis=2)
-    # Einsum: multiply (h,w,2) by (h,w,2,6) summing over the coordinate dim (2) -> (h,w,6)
-    steepest_descent_images = np.einsum('ijk,ijkl->ijl', grad_stack, jacobian)
+    
+    # Compute Steepest Descent Images (SDI) without einsum
+    # 1. Reshape gradient to (h, w, 1, 2) to act as a row vector per pixel
+    grad_reshaped = grad_stack[:, :, np.newaxis, :]
+    # 2. Matrix multiply: (h,w,1,2) @ (h,w,2,6) -> (h,w,1,6)
+    sdi_matmul = np.matmul(grad_reshaped, jacobian)
+    # 3. Remove the singleton dimension -> (h,w,6)
+    steepest_descent_images = sdi_matmul.squeeze(axis=2)
 
     # 4. Compute Hessian
-    H = np.einsum('ijk,ijl->kl', steepest_descent_images, steepest_descent_images)
+    # Flatten SDI to (N, 6) where N is total pixels. This allows standard matrix math.
+    sdi_flat = steepest_descent_images.reshape(-1, 6)
+    # Compute H = Sum(SDI.T * SDI) -> (6, N) @ (N, 6) -> (6, 6)
+    H = sdi_flat.T @ sdi_flat
     H_inv = np.linalg.inv(H)
 
     # 5. Optimization Loop
@@ -386,7 +398,9 @@ def align_image(template, target, A):
         6 affine parameters. It is subsequently multiplied by the Inverse Hessian (H_inv)
         to determine the actual step size (delta_p) for the current iteration.
         '''
-        sd_update = np.einsum('ijk,ij->k', steepest_descent_images, error_img)
+        # Compute steepest descent update without einsum
+        # Flatten error image to (N,) and dot product with flattened SDI
+        sd_update = sdi_flat.T @ error_img.reshape(-1)
         delta_p = H_inv @ sd_update
 
         # Construct Delta_M from delta_p
