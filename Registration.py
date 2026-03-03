@@ -271,13 +271,11 @@ def align_image(template, target, A):
     # To do
     '''
     A is the affine transformation matrix.
-    Image alignment consists of moving, and possibly deforming, a template to minimize the
+    Image alignment consists of moving/deforming a template to minimize the
     difference between the template and an image.
-    '''
-    '''
-    The following line of code is responsible for converting the standard
-    3x3 affine transformation matrix A into a 6-element parameter vector p. 
-    This conversion is crucial for the iterative Inverse Compositional 
+    
+    The following code converts the standard 3x3 affine transformation matrix A into a 6-element 
+    parameter vector p. This conversion is crucial for the iterative Inverse Compositional 
     alignment algorithm.
     1. Two Representations of an Affine Warp
     There are different ways to represent the same 2D affine transformation.
@@ -298,8 +296,8 @@ def align_image(template, target, A):
     (i.e., when p=0, W is the identity matrix). This specific parameterization 
     is defined as:
 
-              [ 1+p1   p2   p3 ]
-    W(x; p) = [  p4   1+p5  p6 ]
+              [ 1+p1   p3   p5 ]
+    W(x; p) = [  p2   1+p4  p6 ]
               [  0     0    1  ]
 
     2. Mapping A to p
@@ -341,18 +339,28 @@ def align_image(template, target, A):
     # 1. Coordinate grid
     h, w = template.shape
     y, x = np.mgrid[0:h, 0:w]
-
-    # 2. Analytical Jacobian of the affine warp W(x;p) w.r.t p
-    # Shape: (h, w, 2, 6)
-    # J = [[x, 0, y, 0, 1, 0],
-    #      [0, x, 0, y, 0, 1]]
+    p = np.array([A[0, 0] - 1, A[1, 0], A[0, 1], A[1, 1] - 1, A[0, 2], A[1, 2]])
+    '''
+    Analytical Jacobian of the affine warp W(x;p) w.r.t p
+    x' = (1 + p0)x + p2y + p4
+    y' = p1x + (1 + p3)y + p5
+    Shape: (h, w, 2, 6)
+    J = [[x, 0, y, 0, 1, 0],
+        [0, x, 0, y, 0, 1]]
+    '''
     jacobian = np.zeros((h, w, 2, 6))
-    jacobian[:, :, 0, 0] = x
-    jacobian[:, :, 0, 2] = y
-    jacobian[:, :, 0, 4] = 1
-    jacobian[:, :, 1, 1] = x
-    jacobian[:, :, 1, 3] = y
-    jacobian[:, :, 1, 5] = 1
+    jacobian[:, :, 0, 0] = (1 + p[0])*x
+    jacobian[:, :, 0, 1] = 0
+    jacobian[:, :, 0, 2] = p[2]*y
+    jacobian[:, :, 0, 3] = 0
+    jacobian[:, :, 0, 4] = p[4]
+    jacobian[:, :, 0, 5] = 0
+    jacobian[:, :, 1, 0] = 0
+    jacobian[:, :, 1, 1] = p[1]*x
+    jacobian[:, :, 1, 2] = 0
+    jacobian[:, :, 1, 3] = (1 + p[3])*y
+    jacobian[:, :, 1, 4] = 0
+    jacobian[:, :, 1, 5] = p[5]
 
     # 3. Compute Steepest Descent Images: VT * dW/dp
     # Gradient stack: (h, w, 2)
@@ -401,7 +409,6 @@ def track_multi_frames(template, img_list):
     ransac_thr = 5.0
     ransac_iter = 1000    
     A_list = []
-    current_A = A
     template2 = template.copy()
     i = 0
     for img in img_list:
