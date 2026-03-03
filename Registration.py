@@ -221,21 +221,6 @@ def filter_image(im, filter):
             im_filtered[j, i] = sum_val
     return im_filtered
 
-def get_gradient(im_dx, im_dy):
-    # To do
-    # Calculate the gradient magnitude and angle
-    grad_mag = np.zeros(im_dx.shape)
-    grad_angle = np.zeros(im_dx.shape)
-    for j in range(im_dx.shape[0]):
-        for i in range(im_dx.shape[1]):
-            # The magnitude of the gradient = sqrt(im_dx^2 + im_dy^2)
-            grad_mag[j, i] = math.sqrt(im_dx[j, i]**2 + im_dy[j, i]**2)
-            # The angle of the gradient = the inverse tan(im_dy/im_dx)
-            grad_angle[j, i] = math.atan2(im_dy[j, i], im_dx[j, i])
-            if grad_angle[j, i] < 0:
-                grad_angle[j, i] += math.pi    # Make the angle positive
-    return grad_mag, grad_angle
-
 def warp_image(img, A, output_size):
     # To do
     '''
@@ -355,31 +340,25 @@ def align_image(template, target, A):
     jacobian[:, :, 1, 4] = 0
     jacobian[:, :, 1, 5] = p[5]
 
-    # 3. Compute Steepest Descent Images: VT * dW/dp
+    # Compute Steepest Descent Images: VT * dW/dp
     filterx, filtery = get_differential_filter()
     # Sobel filter, derivate in the x-direction
     filtered_imagex = filter_image(template, filterx)
     # Sobel filter, derivate in the y-direction
     filtered_imagey = filter_image(template, filtery)
-    grad = get_gradient(filtered_imagex, filtered_imagey)
-    grad_mag = grad[0]
-    grad_angle = grad[1]
 
-    # Gradient stack: (h, w, 2)
-
-    grad_stack = np.stack((filtered_imagex, filtered_imagey), axis=2)
+    # (df/dx, df/dy)
+    grad_dx_dy = np.stack((filtered_imagex, filtered_imagey), axis=2)
     
-    # Compute Steepest Descent Images (SDI) without einsum
-    # 1. Reshape gradient to (h, w, 1, 2) to act as a row vector per pixel
-    grad_reshaped = grad_stack[:, :, np.newaxis, :]
-    # 2. Matrix multiply: (h,w,1,2) @ (h,w,2,6) -> (h,w,1,6)
-    sdi_matmul = np.matmul(grad_reshaped, jacobian)
-    # 3. Remove the singleton dimension -> (h,w,6)
-    steepest_descent_images = sdi_matmul.squeeze(axis=2)
+    # Compute steepest descent iterating over all of the pixels
+    steepest_grad = np.zeros((h, w, 6))
+    for j in range(h):
+        for i in range(w):
+            steepest_grad[j, i] = np.matmul(grad_dx_dy[j, i], jacobian[j, i, :, :])
 
-    # 4. Compute Hessian
+    # Compute Hessian
     # Flatten SDI to (N, 6) where N is total pixels. This allows standard matrix math.
-    sdi_flat = steepest_descent_images.reshape(-1, 6)
+    sdi_flat = steepest_grad.reshape(-1, 6)
     # Compute H = Sum(SDI.T * SDI) -> (6, N) @ (N, 6) -> (6, 6)
     H = sdi_flat.T @ sdi_flat
     H_inv = np.linalg.inv(H)
