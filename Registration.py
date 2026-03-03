@@ -357,36 +357,39 @@ def align_image(template, target, A):
             steepest_grad[j, i] = np.matmul(grad_dx_dy[j, i], jacobian[j, i, :, :])
 
     # Compute Hessian
-    # Flatten SDI to (N, 6) where N is total pixels. This allows standard matrix math.
-    sdi_flat = steepest_grad.reshape(-1, 6)
-    # Compute H = Sum(SDI.T * SDI) -> (6, N) @ (N, 6) -> (6, 6)
-    H = sdi_flat.T @ sdi_flat
-    H_inv = np.linalg.inv(H)
+    H = np.zeros((6, 6))
+    for j in range(h):
+        for i in range(w):
+            # Reshape to (6, 1) to perform outer product accumulation
+            val = steepest_grad[j, i].reshape(6, 1)     # (6 x 1)
+            H += val @ val.T
+    steepest_descent_Nx6 = steepest_grad.reshape(-1, 6)     # (N, 6)
+    H_inverse = np.linalg.inv(H)
 
-    # 5. Optimization Loop
+    # Optimization Loop
     A_refined = A.copy()
     errors = []
     max_iter = 75
 
     for i in range(max_iter):
         warped_target = warp_image(target, A_refined, (h, w))
-        error_img = warped_target.astype(np.float32) - template.astype(np.float32)
-        errors.append(np.mean(error_img**2))
+        error = warped_target.astype(np.float32) - template.astype(np.float32)
+        errors.append(np.mean(error**2))
         '''
         This vector represents how much the error would change if you tweaked each of the
         6 affine parameters. It is subsequently multiplied by the Inverse Hessian (H_inv)
         to determine the actual step size (delta_p) for the current iteration.
         '''
         # Compute steepest descent update without einsum
-        # Flatten error image to (N,) and dot product with flattened SDI
-        sd_update = sdi_flat.T @ error_img.reshape(-1)
-        delta_p = H_inv @ sd_update
+        # Flatten error image to (N,) and dot product with 1x6 steepest descent
+        steepest_grad_update = steepest_descent_Nx6.T @ error.reshape(-1)
+        delta_p = H_inverse @ steepest_grad_update
 
         # Construct Delta_M from delta_p
         delta_M = np.array([
             [1 + delta_p[0], delta_p[2], delta_p[4]],
             [delta_p[1], 1 + delta_p[3], delta_p[5]],
-            [0, 0, 1]
+            [0,                       0,          1]
         ])
         
         A_refined = A_refined @ np.linalg.inv(delta_M)
