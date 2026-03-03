@@ -173,7 +173,7 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
         A = np.eye(3)       # Return identity matrix.
         
     print(f"Number of inliers found: {max_inlier_count}")
-    print("Affine Transformation Matrix (A):\n", A)
+    print("Affine Transformation Matrix A:\n", A)
     return A
 
 
@@ -235,6 +235,7 @@ def get_gradient(im_dx, im_dy):
             if grad_angle[j, i] < 0:
                 grad_angle[j, i] += math.pi    # Make the angle positive
     return grad_mag, grad_angle
+
 def warp_image(img, A, output_size):
     # To do
     '''
