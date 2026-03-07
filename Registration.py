@@ -47,7 +47,7 @@ def find_match(img1, img2):
     x_array2 = np.array(x2)
     return x_array1, x_array2
 
-def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
+def align_image_using_feature(x1, x2, ransac_thr, ransac_iter, img1=None, img2=None):
     # To do
     '''
     RANSAC algorithm for Affine Transformation fitting. 
@@ -128,6 +128,8 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     
     # Re-fit with all inliers
     if best_inliers is not None and max_inlier_count >= 3:
+        if img1 is not None and img2 is not None:
+            visualize_find_match(img1, img2, x1, x2, mask=best_inliers)
         '''
         It extracts the actual coordinates of all the "good" points (inlier_x1, inlier_x2) using 
         the saved mask best_inliers.
@@ -392,10 +394,10 @@ def track_multi_frames(template, img_list):
     template2 = template.copy()
     i = 0
     for img in img_list:
-        # 1. Initialize with the first frame
+        # Initialize with the first frame
         x1, x2 = find_match(template, img)
         current_A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
-        # 2. Track: Use previous A as guess for current frame
+        # Track: Use previous A as guess for current frame
         # align_image returns (A, errors), so we must unpack it
         refined_A, errors = align_image(template2, img, current_A)
         A_list.append(refined_A)
@@ -406,7 +408,7 @@ def track_multi_frames(template, img_list):
     return A_list
 
 
-def visualize_find_match(img1, img2, x1, x2, img_h=500):
+def visualize_find_match(img1, img2, x1, x2, img_h=500, mask=None):
     assert x1.shape == x2.shape, 'x1 and x2 should have same shape!'
     scale_factor1 = img_h/img1.shape[0]
     scale_factor2 = img_h/img2.shape[0]
@@ -417,9 +419,17 @@ def visualize_find_match(img1, img2, x1, x2, img_h=500):
     x2[:, 0] += img1_resized.shape[1]
     img = np.hstack((img1_resized, img2_resized))
     plt.imshow(img, cmap='gray', vmin=0, vmax=255)
-    for i in range(x1.shape[0]):
-        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'b')
-        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], 'bo')
+    
+    indices = range(x1.shape[0])
+    if mask is not None:
+        indices = np.argsort(mask)
+
+    for i in indices:
+        color = 'b'
+        if mask is not None and mask[i]:
+            color = 'y'
+        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], color)
+        plt.plot([x1[i, 0], x2[i, 0]], [x1[i, 1], x2[i, 1]], color + 'o')
     plt.axis('off')
     plt.show()
 
@@ -466,12 +476,6 @@ def visualize_align_image(template, target, A, A_refined, errors=None):
     plt.axis('off')
     plt.show()
 
-    if errors is not None:
-        plt.plot(errors * 255)
-        plt.xlabel('Iteration')
-        plt.ylabel('Error')
-        plt.show()
-
 
 def visualize_track_multi_frames(template, img_list, A_list):
     bbox_list = []
@@ -512,28 +516,28 @@ if __name__ == '__main__':
         target_list.append(target)
 
     x1, x2 = find_match(template, target_list[0])
-    visualize_find_match(template, target_list[0], x1, x2)
 
     ransac_thr = 5.0
     ransac_iter = 1000
-    A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter)
+    A = align_image_using_feature(x1, x2, ransac_thr, ransac_iter, template, target_list[0])
 
     img_warped = warp_image(target_list[0], A, target_list[0].shape)
     plt.imshow(img_warped, cmap='gray', vmin=0, vmax=255)
     plt.axis('off')
     plt.show()
-# 1. Ensure images are the same size and data type
+    # Ensure images are the same size and data type
     # Resizing the warped image to match the template dimensions if they differ
     if template.shape != img_warped.shape:
         img_warped = cv2.resize(img_warped, (template.shape[1], template.shape[0]), interpolation=cv2.INTER_AREA)
-    # 3. Compute the absolute difference
+    # Compute the absolute difference
     # Ensure images are the same data type (uint8) for cv2.absdiff
     img_warped_uint8 = img_warped.astype(np.uint8)
     # Compare the template with the warped image (aligned to template)
   #  error_map = cv2.absdiff(template, img_warped_uint8)
-
-   # A_refined, errors = align_image(template, target_list[0], A)
-  #  visualize_align_image(template, target_list[0], A, A_refined, errors)
+    template3 = template.copy()
+    
+    A_refined, errors = align_image(template3, target_list[0], A)
+    visualize_align_image(template3, target_list[0], A, A_refined, errors)
 
     A_list = track_multi_frames(template, target_list)
     visualize_track_multi_frames(template, target_list, A_list)
