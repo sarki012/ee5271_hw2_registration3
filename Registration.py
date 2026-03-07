@@ -21,22 +21,13 @@ def find_match(img1, img2):
     sift = cv2.SIFT_create()   
     '''
     sift.detectAndCompute: locates keypoints and calculates feature descriptors, which are
-    128-dimensional vector
-    
-    Finds keypoints in both images and calculates 
-    a mathematical description ("descriptor") for the area around each point.
-    Keypoints: The (x, y) coordinates of corners, blobs, or distinct features.
-    Descriptors: 128-dimensional vectors that are a histogram of image gradients.
+    128-dimensional vectors.
     '''
     keypts1, descript1 = sift.detectAndCompute(img1, None)
     keypts2, descript2 = sift.detectAndCompute(img2, None)
 
     '''
     find the 2 closest matches in img2 for every feature in img1.
-    neighbors.fit(descriptors2): Prepares the descriptors from the second image for searching.
-    neighbors.kneighbors(descriptors1): For every descriptor in img1, it finds the two most 
-    similar descriptors in img2 based on Euclidean distance.
-    distance is a 2D array with dimensions (Number of Keypoints in Image 1, 2).
     '''
     neighbors = NearestNeighbors(n_neighbors=2).fit(descript2)
     distance, x_y = neighbors.kneighbors(descript1)
@@ -44,14 +35,7 @@ def find_match(img1, img2):
     '''
     The following code compares the distance of the best match (distance[i][0]) to the 
     second-best match (distance[i][1]). If the best match is much closer 
-    (less than 0.7*distance) than the second-best, it is a match. If the distances are 
-    similar (ratio >= 0.75), it means the feature in img1 is similar to multiple features 
-    in img2, so there is no match.
-    Euclidean distance refers to the similarity between the feature descriptors
-    distance[i][0] is the Euclidean distance to the closest match in Image 2.
-    distance[i][1] is the Euclidean distance to the second closest match in Image 2.
-    These values represent how "similar" the features are. A smaller distance means a 
-    better match.
+    (less than 0.75*distance) than the second-best, it is a match.
     '''
     x1 = []
     x2 = []
@@ -71,7 +55,7 @@ def align_image_using_feature(x1, x2, ransac_thr, ransac_iter):
     inliers = []
     distance = []
     num_inliers = 0
-    best_inliers_mask = None
+    best_inliers = None
     max_inlier_count = 0
     num_samples = 3 
     '''
@@ -230,7 +214,7 @@ def warp_image(img, A, output_size):
     h_dest, w_dest = output_size
     h_src, w_src = img.shape
 
-    # Define the points/coordinates of the original image grid
+    # Define the coordinates of the original image grid
     # interpn expects 1D arrays for each dimension's coordinates
     points = (np.arange(h_src), np.arange(w_src))
 
@@ -360,9 +344,10 @@ def align_image(template, target, A):
     H = np.zeros((6, 6))
     for j in range(h):
         for i in range(w):
-            # Reshape to (6, 1) to perform outer product accumulation
-            val = steepest_grad[j, i].reshape(6, 1)     # (6 x 1)
-            H += val @ val.T
+            # Reshape to (6, 1) to perform outer product accumulation.
+            valley = steepest_grad[j, i].reshape(6, 1)     # (6 x 1)
+            H += valley @ valley.T    
+            # Hessian for the entire image area. (6, 6)
     steepest_descent_Nx6 = steepest_grad.reshape(-1, 6)     # (N, 6)
     H_inverse = np.linalg.inv(H)
 
@@ -380,7 +365,6 @@ def align_image(template, target, A):
         6 affine parameters. It is subsequently multiplied by the Inverse Hessian (H_inv)
         to determine the actual step size (delta_p) for the current iteration.
         '''
-        # Compute steepest descent update without einsum
         # Flatten error image to (N,) and dot product with 1x6 steepest descent
         steepest_grad_update = steepest_descent_Nx6.T @ error.reshape(-1)
         delta_p = H_inverse @ steepest_grad_update
